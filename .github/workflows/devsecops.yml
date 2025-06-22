@@ -1,0 +1,48 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        cd app
+        npm install
+
+    - name: Run npm audit (SCA)
+      run: |
+        cd app
+        npm audit --json > audit-report.json || true
+
+    - name: Install and run Semgrep (SAST)
+      run: |
+        pip install semgrep
+        semgrep scan --config=auto --json > semgrep-output.json || true
+
+    - name: Run TruffleHog (Secrets)
+      run: |
+        pip install trufflehog
+        trufflehog file://$(pwd) --json | tee trufflehog-output.json || true
+
+    - name: Build Docker image
+      run: docker build -t juice-shop-devsecops .
+
+    - name: Install and run Trivy (image scan)
+      run: |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+        ./trivy image --severity HIGH,CRITICAL juice-shop-devsecops || true
