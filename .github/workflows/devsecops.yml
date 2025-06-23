@@ -50,13 +50,13 @@ jobs:
         image-ref: 'juice-shop-devsecops:latest'
 
     - name: Log in to Docker Hub
-      run: echo "${{ secrets.rrrtttggg }}" | docker login -u "${{ secrets.testd66 }}" --password-stdin
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
     - name: Tag image for Docker Hub
-      run: docker tag juice-shop-devsecops:latest ${{ secrets.testd66 }}/juice-shop-devsecops:latest
+      run: docker tag juice-shop-devsecops:latest ${{ secrets.DOCKER_USERNAME }}/juice-shop-devsecops:latest
 
     - name: Push to Docker Hub
-      run: docker push ${{ secrets.testd66 }}/juice-shop-devsecops:latest
+      run: docker push ${{ secrets.DOCKER_USERNAME }}/juice-shop-devsecops:latest
 
     - name: Run ZAP Baseline Scan (DAST)
       uses: zaproxy/action-baseline@v0.11.0
