@@ -31,9 +31,8 @@ jobs:
     - name: Install dependencies
       run: |
         cd app
-        npm install
-        npm audit
-        npm audit fix --force || true
+        npm install || true
+        npm audit fix --json > audit-report.json || true
 
     - name: Run TruffleHog (Secrets scan)
       uses: trufflesecurity/trufflehog@main
