@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
   security-events: write
+  packages: write
+  statuses: read
+  issues: write
 
 jobs:
-
   semgrep:
     name: Static Analysis (Semgrep)
     runs-on: ubuntu-latest
@@ -19,11 +21,12 @@ jobs:
       image: returntocorp/semgrep
     steps:
       - uses: actions/checkout@v4
-      - name: Run Semgrep scan
+      - name: Run Semgrep
         run: |
-          semgrep scan --config=p/security-audit ./app --sarif --output=semgrep-results.sarif || true
+          semgrep scan --config=p/security-audit --sarif --output=semgrep-results.sarif || true
       - name: Upload Semgrep results
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: semgrep-results.sarif
 
@@ -35,25 +38,26 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run Gitleaks
-        run: |
-          curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64.tar.gz | tar -xz
-          chmod +x gitleaks
-          ./gitleaks detect --source=. --report-format=sarif --report-path=gitleaks-results.sarif || true
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: detect --source=. --report-format sarif --report-path=gitleaks-results.sarif
       - name: Upload Gitleaks results
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: gitleaks-results.sarif
 
-  trivy:
+  build-and-scan:
     name: Dependency Scan & Image Vulnerabilities (Trivy)
     runs-on: ubuntu-latest
+    needs: [semgrep, gitleaks]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build Docker image from ./app
-        run: docker build -t juice-shop-app ./app
-      - name: Run Trivy scan on Docker image
+      - name: Build Docker image
+        run: docker build -t juice-shop-app .
+      - name: Run Trivy scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: juice-shop-app
@@ -63,6 +67,32 @@ jobs:
           exit-code: "0"
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: trivy-results.sarif
 
+  dast-zap:
+    name: Dynamic Analysis (ZAP DAST)
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+    services:
+      juice-shop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
+        options: >-
+          --health-cmd "curl -f http://localhost:3000 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Wait for Juice Shop to start
+        run: |
+          echo "Waiting for Juice Shop..."
+          timeout 120 bash -c 'until curl -sSf http://localhost:3000 > /dev/null; do sleep 5; done'
+      - name: Run ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          target: 'http://localhost:3000'
+          cmd_options: '-a -T 300'
+        continue-on-error: true
