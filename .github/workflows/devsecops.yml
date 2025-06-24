@@ -2,9 +2,9 @@ name: build-and-scan
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
@@ -13,62 +13,65 @@ permissions:
 jobs:
   build-and-scan:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        submodules: true
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          submodules: true
 
-    - name: Update submodules
-      run: git submodule update --init --recursive
+      - name: Update submodules
+        run: git submodule update --init --recursive
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: 18
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
 
-    - name: Install dependencies
-      run: |
-        cd app
-        npm install || true
-        npm audit fix --json > audit-report.json || true
+      - name: Install dependencies
+        run: |
+          cd app
+          npm install || true
+          npm audit fix --json > audit-report.json || true
 
-    - name: Run TruffleHog (Secrets scan)
-      uses: trufflesecurity/trufflehog@main
-      with:
-        path: '.'
-        extra_args: ''
+      - name: Run TruffleHog (Secrets scan)
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: '.'
+          extra_args: ''
 
-    - name: Run Semgrep (SAST)
-      uses: returntocorp/semgrep-action@v1
-      with:
-        config: 'auto'
+      - name: Run Semgrep (SAST)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: 'auto'
 
-    - name: Build Docker image
-      run: docker build -t juice-shop-devsecops:latest .
+      - name: Build Docker image
+        run: docker build -t juice-shop-devsecops:latest .
 
-    - name: Run Trivy (Docker image scan)
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: 'juice-shop-devsecops:latest'
+      - name: Run Trivy (Docker image scan)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'juice-shop-devsecops:latest'
 
-    - name: Log in to Docker Hub
-      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-    - name: Tag image for Docker Hub
-      run: docker tag juice-shop-devsecops:latest ${{ secrets.DOCKER_USERNAME }}/juice-shop-devsecops:latest
+      - name: Tag image for Docker Hub
+        run: docker tag juice-shop-devsecops:latest ${{ secrets.DOCKER_USERNAME }}/juice-shop-devsecops:latest
 
-    - name: Push to Docker Hub
-      run: docker push ${{ secrets.DOCKER_USERNAME }}/juice-shop-devsecops:latest
+      - name: Push to Docker Hub
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/juice-shop-devsecops:latest
 
-    - name: Run ZAP Baseline Scan (DAST)
-      uses: zaproxy/action-baseline@v0.7.0
-      with:
-        target: 'http://juice-shop-devsecops:3000'
-        cmd_options: '-g zap-report.html || true'
+      # DAST – OWASP ZAP
+      - name: Run ZAP Baseline Scan (DAST)
+        uses: zaproxy/action-baseline@v0.7.0
+        with:
+          target: 'http://juice-shop-devsecops:3000'
+          docker_name: 'ghcr.io/zaproxy/zaproxy'
+          cmd_options: '-g ./zap-report.html || true'
 
-    - name: Upload ZAP report
-      uses: actions/upload-artifact@v4
-      with:
-        name: zap-report
-        path: zap-report.html
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-report.html
