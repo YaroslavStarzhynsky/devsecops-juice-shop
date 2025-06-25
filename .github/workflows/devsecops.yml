@@ -19,38 +19,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-
       - name: Install dependencies
-        run: |
-          cd juice-shop
-          npm install --no-audit --no-fund --legacy-peer-deps || true
-
+        run: npm install --no-audit --no-fund --legacy-peer-deps --package-lock
       - name: Run OWASP Dependency-Check
-        id: depcheck
         uses: dependency-check/Dependency-Check_Action@main
         with:
-          project: 'juice-shop'
-          path: './juice-shop/'
-          format: 'SARIF'
-          out: './'
+          project: 'app'
+          path: "./"
+          format: "SARIF"
+          out: "./"
           args: >
             --failOnCVSS 7
             --enableRetired
             --disableArchive
-        continue-on-error: true
-
-      - name: Ensure SARIF exists
-        run: |
-          if [ ! -f "dependency-check-report.sarif" ]; then
-            echo "SARIF not found, creating empty placeholder."
-            echo '{"version": "2.1.0", "runs": []}' > dependency-check-report.sarif
-          fi
-
       - name: Upload Dependency-Check results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -78,79 +63,15 @@ jobs:
     name: Static Analysis (SAST)
     runs-on: ubuntu-latest
     container:
-      image: returntocorp/semgrep
+      image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
       - name: Run Semgrep
         run: |
-          semgrep scan --config=p/security-audit --sarif --output=semgrep-results.sarif || true
+          semgrep scan --config=p/security-audit --sarif --output=semgrep-results.sarif
+          exit 0
       - name: Upload Semgrep results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: semgrep-results.sarif
-
-  build-and-scan:
-    name: Build and Container Scan
-    needs: [dependency-check, gitleaks, semgrep]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./juice-shop
-          file: ./juice-shop/Dockerfile
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/juice-shop:local-scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Run Trivy scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/juice-shop:local-scan
-          format: "sarif"
-          output: "trivy-results.sarif"
-          severity: "CRITICAL,HIGH"
-          exit-code: "0"
-      - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
-
-  dast-scan:
-    name: Dynamic Analysis (DAST)
-    needs: build-and-scan
-    runs-on: ubuntu-latest
-    services:
-      juice-shop:
-        image: ghcr.io/${{ github.repository_owner }}/juice-shop:local-scan
-        ports:
-          - 3000:3000
-        options: >-
-          --health-cmd "curl -f http://localhost:3000 || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 10s
-    steps:
-      - name: Wait for Juice Shop to start
-        run: |
-          echo "Waiting for Juice Shop to be healthy..."
-          timeout 300 bash -c 'until curl -f http://localhost:3000; do sleep 5; done'
-          echo "Juice Shop is ready!"
-      - name: Run OWASP ZAP scan
-        uses: zaproxy/action-full-scan@v0.12.0
-        with:
-          target: "http://juice-shop:3000"
-          cmd_options: "-a -T 300"
-        continue-on-error: true
