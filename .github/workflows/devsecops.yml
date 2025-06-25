@@ -3,75 +3,51 @@ name: DevSecOps Pipeline
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-permissions:
-  contents: read
-  security-events: write
-  packages: write
-  statuses: read
-  issues: write
 
 jobs:
+  sast:
+    name: Static Analysis (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/owasp-top-ten"
+
+  secrets:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: GitLeaks scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   dependency-check:
     name: Dependency Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
       - name: Install dependencies
-        run: npm install --no-audit --no-fund --legacy-peer-deps --package-lock
+        run: |
+          if [ -f "package.json" ]; then
+            npm install --no-audit --no-fund --legacy-peer-deps --package-lock
+          else
+            echo "No package.json found, skipping install."
+          fi
       - name: Run OWASP Dependency-Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
-          project: 'app'
-          path: "./"
+          project: "juice-shop"
           format: "SARIF"
-          out: "./"
-          args: >
-            --failOnCVSS 7
-            --enableRetired
-            --disableArchive
+          out: "reports"
+      - name: Ensure SARIF exists
+        run: |
+          if [ ! -f reports/dependency-check-report.sarif ]; then
+            echo "Missing SARIF report!" && exit 1
+          fi
       - name: Upload Dependency-Check results
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with:
-          sarif_file: dependency-check-report.sarif
-
-  gitleaks:
-    name: Secrets Detection
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Run Gitleaks
-        run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
-          ./gitleaks detect --source=. --redact -v --exit-code=0 --report-format=sarif --report-path=gitleaks-results.sarif
-      - name: Upload Gitleaks results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: gitleaks-results.sarif
-
-  semgrep:
-    name: Static Analysis (SAST)
-    runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run Semgrep
-        run: |
-          semgrep scan --config=p/security-audit --sarif --output=semgrep-results.sarif
-          exit 0
-      - name: Upload Semgrep results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: semgrep-results.sarif
+          sarif_file: reports/dependency-check-report.sarif
